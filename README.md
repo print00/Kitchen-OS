@@ -3,7 +3,7 @@
 Local-first kitchen operations app for recipes, inventory, production planning, grocery purchasing, prep tasks, and chef scheduling.
 
 ## Architecture
-- Backend: FastAPI (`/api/*`) + SQLite (`kitchenos.db`)
+- Backend: FastAPI (`/api/*`) + DB layer supporting SQLite or Postgres
 - Frontend: single-page HTML/CSS/JS served by FastAPI
 - Auth: local username/password + bearer token table
 - Role-based permissions: `admin`, `manager`, `prep`
@@ -59,6 +59,27 @@ Local-first kitchen operations app for recipes, inventory, production planning, 
 4. Open [http://localhost:8000](http://localhost:8000)
 
 After setup, run with one command: `./run.sh`
+
+## Database Modes
+- Local default (no env var): SQLite file `kitchenos.db`
+- Cloud/public mode: set `DATABASE_URL` to a Postgres connection string
+  - Example: `postgresql://user:pass@host/dbname?sslmode=require`
+
+## Publish At $0 (Neon + Render)
+1. Create a free Postgres DB on [Neon](https://neon.com/pricing).
+2. Copy Neon connection string and ensure it includes `sslmode=require`.
+3. Push this repo to GitHub.
+4. Create a free Web Service on [Render](https://render.com/docs/free) from your repo.
+5. Render settings:
+   - Build command: `pip install -r requirements.txt`
+   - Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+6. Add environment variable in Render:
+   - `DATABASE_URL=<your neon postgres url>`
+7. Deploy. On first startup, schema + seed data are created automatically.
+
+Note:
+- Render free services can sleep when idle.
+- Neon free tier has resource/storage limits.
 
 ## First Admin User
 Seeded default admin (first run):

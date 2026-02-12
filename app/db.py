@@ -1,11 +1,20 @@
+import os
+import re
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 DB_PATH = Path(__file__).resolve().parent.parent / "kitchenos.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+USING_POSTGRES = DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://")
+
+if USING_POSTGRES:
+    import psycopg
+    from psycopg.rows import dict_row
 
 
-SCHEMA_SQL = """
+SQLITE_SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS roles (
@@ -169,22 +178,66 @@ CREATE TABLE IF NOT EXISTS chef_schedules (
 );
 """
 
-
-def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+POSTGRES_SCHEMA_SQL = (
+    SQLITE_SCHEMA_SQL.replace("PRAGMA foreign_keys = ON;", "")
+    .replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+    .replace("REAL", "DOUBLE PRECISION")
+)
 
 
 def now_iso() -> str:
     return datetime.utcnow().isoformat()
 
 
+def _adapt_query(query: str) -> str:
+    if USING_POSTGRES:
+        return query.replace("?", "%s")
+    return query
+
+
+def _extract_insert_table(query: str) -> str | None:
+    m = re.match(r"\s*INSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)", query, flags=re.IGNORECASE)
+    return m.group(1) if m else None
+
+
+def get_conn() -> Any:
+    if USING_POSTGRES:
+        return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def init_db() -> None:
     conn = get_conn()
     try:
-        conn.executescript(SCHEMA_SQL)
-        conn.commit()
+        if USING_POSTGRES:
+            statements = [s.strip() for s in POSTGRES_SCHEMA_SQL.split(";") if s.strip()]
+            pending = statements[:]
+
+            # Postgres validates FK dependencies at CREATE TABLE time.
+            # Execute in multiple passes to tolerate declaration order.
+            while pending:
+                next_pending: list[str] = []
+                progressed = False
+                first_error: Exception | None = None
+                for stmt in pending:
+                    try:
+                        with conn.cursor() as cur:
+                            cur.execute(stmt)
+                        conn.commit()
+                        progressed = True
+                    except Exception as ex:
+                        conn.rollback()
+                        next_pending.append(stmt)
+                        if first_error is None:
+                            first_error = ex
+                if not progressed:
+                    raise first_error if first_error else RuntimeError("Failed to initialize Postgres schema")
+                pending = next_pending
+        else:
+            conn.executescript(SQLITE_SCHEMA_SQL)
+            conn.commit()
     finally:
         conn.close()
 
@@ -192,9 +245,20 @@ def init_db() -> None:
 def execute(query: str, params: tuple = ()) -> int:
     conn = get_conn()
     try:
-        cur = conn.execute(query, params)
+        sql = _adapt_query(query)
+        cur = conn.execute(sql, params)
         conn.commit()
-        return cur.lastrowid
+
+        if USING_POSTGRES:
+            table = _extract_insert_table(query)
+            if table:
+                try:
+                    seq_row = conn.execute("SELECT currval(pg_get_serial_sequence(%s, 'id')) AS id", (table,)).fetchone()
+                    return int(seq_row["id"])
+                except Exception:
+                    return 0
+            return 0
+        return int(cur.lastrowid)
     finally:
         conn.close()
 
@@ -202,7 +266,12 @@ def execute(query: str, params: tuple = ()) -> int:
 def execute_many(query: str, rows: list[tuple]) -> None:
     conn = get_conn()
     try:
-        conn.executemany(query, rows)
+        sql = _adapt_query(query)
+        if USING_POSTGRES:
+            with conn.cursor() as cur:
+                cur.executemany(sql, rows)
+        else:
+            conn.executemany(sql, rows)
         conn.commit()
     finally:
         conn.close()
@@ -211,7 +280,7 @@ def execute_many(query: str, rows: list[tuple]) -> None:
 def query_all(query: str, params: tuple = ()) -> list[dict]:
     conn = get_conn()
     try:
-        rows = conn.execute(query, params).fetchall()
+        rows = conn.execute(_adapt_query(query), params).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
@@ -220,7 +289,7 @@ def query_all(query: str, params: tuple = ()) -> list[dict]:
 def query_one(query: str, params: tuple = ()) -> dict | None:
     conn = get_conn()
     try:
-        row = conn.execute(query, params).fetchone()
+        row = conn.execute(_adapt_query(query), params).fetchone()
         return dict(row) if row else None
     finally:
         conn.close()

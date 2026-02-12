@@ -8,7 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.auth import hash_password
-from app.db import execute, init_db, query_one
+from app.db import execute, init_db, now_iso, query_one
 
 
 def main() -> None:
@@ -32,8 +32,8 @@ def main() -> None:
         print(f"Updated admin user: {args.username}")
     else:
         execute(
-            "INSERT INTO users(username, full_name, password_hash, role_id, active, created_at) VALUES (?, ?, ?, ?, 1, datetime('now'))",
-            (args.username, args.full_name, hash_password(args.password), role["id"]),
+            "INSERT INTO users(username, full_name, password_hash, role_id, active, created_at) VALUES (?, ?, ?, ?, 1, ?)",
+            (args.username, args.full_name, hash_password(args.password), role["id"], now_iso()),
         )
         print(f"Created admin user: {args.username}")
 
