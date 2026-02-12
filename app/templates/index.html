@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kitchen OS</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div id="loginView" class="centered">
+      <div class="card login-card">
+        <h1>Kitchen OS</h1>
+        <p>Back-of-house operations dashboard</p>
+        <input id="loginUser" placeholder="Username" value="admin" />
+        <input id="loginPass" placeholder="Password" type="password" value="admin123" />
+        <button class="btn btn-lg" onclick="login()">Sign In</button>
+        <small>Seed users: admin / chef1 / prep1 (password: admin123)</small>
+      </div>
+    </div>
+
+    <div id="appView" class="hidden">
+      <header>
+        <div>
+          <h2>Kitchen OS</h2>
+          <p id="sessionInfo"></p>
+        </div>
+        <div class="row gap">
+          <button class="btn" onclick="refreshActiveTab()">Refresh</button>
+          <button class="btn danger" onclick="logout()">Logout</button>
+        </div>
+      </header>
+
+      <nav class="tabs" id="tabs"></nav>
+
+      <main>
+        <section id="dashboard" class="tab-pane"></section>
+        <section id="recipes" class="tab-pane hidden"></section>
+        <section id="inventory" class="tab-pane hidden"></section>
+        <section id="production" class="tab-pane hidden"></section>
+        <section id="grocery" class="tab-pane hidden"></section>
+        <section id="prep" class="tab-pane hidden"></section>
+        <section id="schedule" class="tab-pane hidden"></section>
+        <section id="users" class="tab-pane hidden"></section>
+        <section id="analytics" class="tab-pane hidden"></section>
+      </main>
+    </div>
+
+    <script src="/static/app.js?v=6"></script>
+  </body>
+</html>
