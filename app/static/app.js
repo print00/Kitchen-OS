@@ -6,9 +6,101 @@ const state = {
 };
 
 const roleCanEdit = () => ['admin', 'manager'].includes(state.user?.role);
+const tabMeta = {
+  dashboard: { label: 'Dashboard', icon: '🏠' },
+  recipes: { label: 'Recipes', icon: '📘' },
+  inventory: { label: 'Inventory', icon: '📦' },
+  production: { label: 'Production', icon: '🍳' },
+  grocery: { label: 'Grocery', icon: '🧾' },
+  prep: { label: 'Prep', icon: '✅' },
+  schedule: { label: 'Schedule', icon: '🗓️' },
+  analytics: { label: 'Analytics', icon: '📊' },
+  users: { label: 'Users', icon: '👥' },
+};
 
 function el(id) {
   return document.getElementById(id);
+}
+
+function showToast(message, type = 'info') {
+  const container = el('toastContainer');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 220);
+  }, 2800);
+}
+
+function renderLoadingState(tab) {
+  const pane = el(tab);
+  if (!pane) return;
+  pane.innerHTML = `
+    <div class="card skeleton-card">
+      <div class="skeleton skeleton-title"></div>
+      <div class="skeleton skeleton-line"></div>
+      <div class="skeleton skeleton-line"></div>
+      <div class="skeleton skeleton-line short"></div>
+    </div>
+  `;
+}
+
+function renderErrorState(tab, message) {
+  const pane = el(tab);
+  if (!pane) return;
+  pane.innerHTML = `
+    <div class="card error-state">
+      <h3>Something went wrong</h3>
+      <p>${message}</p>
+      <button class="btn" onclick="refreshActiveTab()">Retry</button>
+    </div>
+  `;
+}
+
+function enhanceResponsiveTables(root = document) {
+  root.querySelectorAll('table').forEach((table) => {
+    const labels = Array.from(table.querySelectorAll('thead th')).map((th) => th.textContent?.trim() || '');
+    table.classList.add('responsive-table');
+    table.querySelectorAll('tbody tr').forEach((tr) => {
+      Array.from(tr.children).forEach((cell, idx) => {
+        if (!cell.getAttribute('data-label')) cell.setAttribute('data-label', labels[idx] || '');
+      });
+    });
+  });
+}
+
+function closeMobileSidebar() {
+  el('appSidebar')?.classList.remove('open');
+}
+
+function setupShellInteractions() {
+  const menuBtn = el('menuToggle');
+  if (menuBtn && !menuBtn.dataset.bound) {
+    menuBtn.dataset.bound = '1';
+    menuBtn.addEventListener('click', () => {
+      el('appSidebar')?.classList.toggle('open');
+    });
+  }
+}
+
+function toggleFilterPanel(panelId) {
+  const panel = el(panelId);
+  if (!panel) return;
+  panel.classList.toggle('hidden');
+}
+
+function filterTableRows(tableId, query) {
+  const q = (query || '').trim().toLowerCase();
+  const table = el(tableId);
+  if (!table) return;
+  table.querySelectorAll('tbody tr').forEach((row) => {
+    const text = row.textContent.toLowerCase();
+    row.style.display = text.includes(q) ? '' : 'none';
+  });
 }
 
 async function api(path, options = {}) {
@@ -66,11 +158,17 @@ function pickCsvFile(onLoad) {
 
 function setTabs() {
   const tabs = state.tabs.filter((t) => !(t === 'users' && state.user?.role !== 'admin'));
-  el('tabs').innerHTML = tabs
-    .map(
-      (t) => `<button class="tab-btn ${state.activeTab === t ? 'active' : ''}" onclick="switchTab('${t}')">${t[0].toUpperCase() + t.slice(1)}</button>`
-    )
+  const navHtml = tabs
+    .map((t) => {
+      const meta = tabMeta[t] || { label: t, icon: '•' };
+      return `<button class="tab-btn ${state.activeTab === t ? 'active' : ''}" onclick="switchTab('${t}')" aria-label="${meta.label}">
+        <span class="tab-icon" aria-hidden="true">${meta.icon}</span>
+        <span>${meta.label}</span>
+      </button>`;
+    })
     .join('');
+  el('tabs').innerHTML = navHtml;
+  if (el('mobileTabs')) el('mobileTabs').innerHTML = navHtml;
 }
 
 function switchTab(tab) {
@@ -78,6 +176,7 @@ function switchTab(tab) {
   for (const pane of document.querySelectorAll('.tab-pane')) pane.classList.add('hidden');
   el(tab).classList.remove('hidden');
   setTabs();
+  closeMobileSidebar();
   refreshActiveTab();
 }
 
@@ -92,9 +191,10 @@ async function login() {
     el('appView').classList.remove('hidden');
     el('sessionInfo').textContent = `${data.user.full_name} (${data.user.role})`;
     setTabs();
+    setupShellInteractions();
     switchTab('dashboard');
   } catch (err) {
-    alert(`Login failed: ${err.message}`);
+    showToast(`Login failed: ${err.message}`, 'error');
   }
 }
 
@@ -115,6 +215,7 @@ async function bootSession() {
     el('appView').classList.remove('hidden');
     el('sessionInfo').textContent = `${me.full_name} (${me.role})`;
     setTabs();
+    setupShellInteractions();
     switchTab('dashboard');
   } catch (_err) {
     logout();
@@ -123,6 +224,7 @@ async function bootSession() {
 
 async function refreshActiveTab() {
   if (!state.user) return;
+  renderLoadingState(state.activeTab);
   try {
     if (state.activeTab === 'dashboard') await renderDashboard();
     if (state.activeTab === 'recipes') await renderRecipes();
@@ -133,8 +235,15 @@ async function refreshActiveTab() {
     if (state.activeTab === 'schedule') await renderSchedule();
     if (state.activeTab === 'users') await renderUsers();
     if (state.activeTab === 'analytics') await renderAnalytics();
+    const activePane = el(state.activeTab);
+    if (activePane) {
+      enhanceResponsiveTables(activePane);
+      const actionRow = activePane.querySelector('.row.between .row.gap');
+      if (actionRow) actionRow.classList.add('mobile-sticky-actions');
+    }
   } catch (err) {
-    alert(err.message);
+    renderErrorState(state.activeTab, err.message);
+    showToast(err.message, 'error');
   }
 }
 
@@ -231,7 +340,7 @@ async function quickAddGrocery() {
     method: 'POST',
     body: JSON.stringify({ name, quantity: qty, unit }),
   });
-  alert('Added to grocery list');
+  showToast('Added to grocery list', 'success');
 }
 
 async function quickAdjustInventory() {
@@ -261,9 +370,16 @@ async function renderRecipes() {
           <button class="btn" onclick="window.print()">Print</button>
         </div>
       </div>
+      <div class="filter-panel">
+        <button class="btn secondary" onclick="toggleFilterPanel('recipesFilterPanel')">Filters</button>
+        <div id="recipesFilterPanel" class="filter-body hidden">
+          <label for="recipeFilterInput">Find recipes</label>
+          <input id="recipeFilterInput" placeholder="Search name or category" oninput="filterTableRows('recipesTable', this.value)" />
+        </div>
+      </div>
       ${!roleCanEdit() ? '<p><small>Prep role is read-only for recipes. Use Admin/Manager account to create/edit.</small></p>' : ''}
       <div class="table-wrap">
-        <table>
+        <table id="recipesTable">
           <thead><tr><th>Name</th><th>Category</th><th>Yield</th><th>Cost</th><th>Actions</th></tr></thead>
           <tbody>
             ${recipes
@@ -297,7 +413,7 @@ async function renderRecipes() {
     const category = (prompt('Category', 'prep') || 'prep').trim();
     const yield_amount = Number(prompt('Yield amount (>0)', '1'));
     if (!Number.isFinite(yield_amount) || yield_amount <= 0) {
-      alert('Yield amount must be greater than 0');
+      showToast('Yield amount must be greater than 0', 'error');
       return;
     }
     const yield_unit = (prompt('Yield unit', 'kg') || 'kg').trim();
@@ -310,12 +426,12 @@ async function renderRecipes() {
       if (!idVal) break;
       const inv = inventory.find((x) => x.id === Number(idVal));
       if (!inv) {
-        alert('Invalid inventory ID');
+        showToast('Invalid inventory ID', 'error');
         continue;
       }
       const quantity = Number(prompt(`Quantity for ${inv.name}`, '1'));
       if (!Number.isFinite(quantity) || quantity < 0) {
-        alert('Quantity must be a non-negative number');
+        showToast('Quantity must be a non-negative number', 'error');
         continue;
       }
       const prep_note = prompt('Prep note', '') || '';
@@ -326,7 +442,7 @@ async function renderRecipes() {
       method: 'POST',
       body: JSON.stringify({ name, category, yield_amount, yield_unit, instructions, ingredients }),
     });
-    alert('Recipe created');
+    showToast('Recipe created', 'success');
     await refreshActiveTab();
   };
 
@@ -337,7 +453,7 @@ async function renderRecipes() {
     const category = (prompt('Category', r.category) || r.category).trim();
     const yield_amount = Number(prompt('Yield amount (>0)', String(r.yield_amount)));
     if (!Number.isFinite(yield_amount) || yield_amount <= 0) {
-      alert('Yield amount must be greater than 0');
+      showToast('Yield amount must be greater than 0', 'error');
       return;
     }
     const yield_unit = (prompt('Yield unit', r.yield_unit) || r.yield_unit).trim();
@@ -360,14 +476,14 @@ async function renderRecipes() {
         })),
       }),
     });
-    alert('Recipe updated');
+    showToast('Recipe updated', 'success');
     await refreshActiveTab();
   };
 
   window.deleteRecipe = async function (id) {
     if (!confirm('Delete this recipe?')) return;
     await api(`/api/recipes/${id}`, { method: 'DELETE' });
-    alert('Recipe deleted');
+    showToast('Recipe deleted', 'success');
     await refreshActiveTab();
   };
 
@@ -414,7 +530,7 @@ async function renderRecipes() {
         method: 'POST',
         body: JSON.stringify({ csv: csvText }),
       });
-      alert(`Imported ${res.imported_recipes} recipes`);
+      showToast(`Imported ${res.imported_recipes} recipes`, 'success');
       await refreshActiveTab();
     });
   };
@@ -437,8 +553,15 @@ async function renderInventory() {
             ${roleCanEdit() ? '<button class="btn" onclick="importInventoryCsv()">Import CSV</button>' : ''}
           </div>
         </div>
+        <div class="filter-panel">
+          <button class="btn secondary" onclick="toggleFilterPanel('inventoryFilterPanel')">Filters</button>
+          <div id="inventoryFilterPanel" class="filter-body hidden">
+            <label for="inventoryFilterInput">Find inventory</label>
+            <input id="inventoryFilterInput" placeholder="Search item, category, supplier" oninput="filterTableRows('inventoryTable', this.value)" />
+          </div>
+        </div>
         <div class="table-wrap">
-          <table>
+          <table id="inventoryTable">
             <thead><tr><th>Item</th><th>Qty</th><th>Par</th><th>Reorder</th><th>Cost/u</th><th>Actions</th></tr></thead>
             <tbody>
               ${items
@@ -514,7 +637,7 @@ async function renderInventory() {
         method: 'POST',
         body: JSON.stringify({ csv: csvText }),
       });
-      alert(`Imported ${res.imported_items} inventory items`);
+      showToast(`Imported ${res.imported_items} inventory items`, 'success');
       await refreshActiveTab();
     });
   };
@@ -576,21 +699,21 @@ async function renderProduction() {
     if (!recipe_id) return;
     const target_yield_amount = Number(prompt('Target yield amount', '1'));
     if (!Number.isFinite(target_yield_amount) || target_yield_amount <= 0) {
-      alert('Target yield amount must be greater than 0');
+      showToast('Target yield amount must be greater than 0', 'error');
       return;
     }
     await api(`/api/production-plans/${plan.id}/items`, {
       method: 'POST',
       body: JSON.stringify({ recipe_id, target_yield_amount }),
     });
-    alert('Production item added');
+    showToast('Production item added', 'success');
     await refreshActiveTab();
   };
 
   window.sendShortages = async function () {
     if (!plan) return;
     const res = await api(`/api/production-plans/${plan.id}/send-shortages`, { method: 'POST', body: '{}' });
-    alert(`Added ${res.added} shortages to grocery list #${res.grocery_list_id || '-'}`);
+    showToast(`Added ${res.added} shortages to grocery list #${res.grocery_list_id || '-'}`, 'success');
     await refreshActiveTab();
   };
 }
@@ -696,7 +819,7 @@ async function renderPrep() {
       method: 'POST',
       body: JSON.stringify({ title, list_type: type, priority, recipe_id, assigned_to, due_time, notes }),
     });
-    alert('Task added');
+    showToast('Task added', 'success');
     await refreshActiveTab();
   };
 }
@@ -837,7 +960,7 @@ async function renderUsers() {
     const role = roleMap[roleInput] || roleInput;
     const password = prompt('Password', 'admin123') || 'admin123';
     await api('/api/users', { method: 'POST', body: JSON.stringify({ username, full_name, role, password }) });
-    alert('User created');
+    showToast('User created', 'success');
     await refreshActiveTab();
   };
 }

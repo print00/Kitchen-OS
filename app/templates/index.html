@@ -4,47 +4,46 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Kitchen OS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/css/theme.css" />
   </head>
   <body>
     <div id="loginView" class="centered">
-      <div class="card login-card">
-        <h1>Kitchen OS</h1>
-        <p>Back-of-house operations dashboard</p>
+      <div class="card login-card login-modern">
+        <p class="eyebrow">Kitchen OS</p>
+        <h1>Sign in to BOH Console</h1>
+        <p>Fast kitchen operations control for prep, production, inventory, and schedules.</p>
+        <label for="loginUser">Username</label>
         <input id="loginUser" placeholder="Username" value="admin" />
+        <label for="loginPass">Password</label>
         <input id="loginPass" placeholder="Password" type="password" value="admin123" />
         <button class="btn btn-lg" onclick="login()">Sign In</button>
         <small>Seed users: admin / chef1 / prep1 (password: admin123)</small>
       </div>
     </div>
 
-    <div id="appView" class="hidden">
-      <header>
-        <div>
-          <h2>Kitchen OS</h2>
-          <p id="sessionInfo"></p>
-        </div>
-        <div class="row gap">
-          <button class="btn" onclick="refreshActiveTab()">Refresh</button>
-          <button class="btn danger" onclick="logout()">Logout</button>
-        </div>
-      </header>
-
-      <nav class="tabs" id="tabs"></nav>
-
-      <main>
-        <section id="dashboard" class="tab-pane"></section>
-        <section id="recipes" class="tab-pane hidden"></section>
-        <section id="inventory" class="tab-pane hidden"></section>
-        <section id="production" class="tab-pane hidden"></section>
-        <section id="grocery" class="tab-pane hidden"></section>
-        <section id="prep" class="tab-pane hidden"></section>
-        <section id="schedule" class="tab-pane hidden"></section>
-        <section id="users" class="tab-pane hidden"></section>
-        <section id="analytics" class="tab-pane hidden"></section>
-      </main>
+    <div id="appView" class="hidden app-shell">
+      {% include 'partials/_sidebar.html' %}
+      <div class="app-main">
+        {% include 'partials/_header.html' %}
+        <main>
+          <section id="dashboard" class="tab-pane"></section>
+          <section id="recipes" class="tab-pane hidden"></section>
+          <section id="inventory" class="tab-pane hidden"></section>
+          <section id="production" class="tab-pane hidden"></section>
+          <section id="grocery" class="tab-pane hidden"></section>
+          <section id="prep" class="tab-pane hidden"></section>
+          <section id="schedule" class="tab-pane hidden"></section>
+          <section id="users" class="tab-pane hidden"></section>
+          <section id="analytics" class="tab-pane hidden"></section>
+        </main>
+      </div>
+      {% include 'partials/_mobile_nav.html' %}
     </div>
 
-    <script src="/static/app.js?v=6"></script>
+    {% include 'partials/_flash_toasts.html' %}
+    {% include 'partials/_empty_state.html' %}
+    <script src="/static/app.js?v=7"></script>
   </body>
 </html>
