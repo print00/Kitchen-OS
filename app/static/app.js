@@ -672,9 +672,26 @@ async function renderProduction() {
           : `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Recipe</th><th>Target Yield</th></tr></thead>
+            <thead><tr><th>Recipe</th><th>Target Yield</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
-              ${planData.items.map((x) => `<tr><td>${x.recipe_name}</td><td>${fmtNum(x.target_yield_amount)} ${x.yield_unit}</td></tr>`).join('') || '<tr><td colspan="2">No items</td></tr>'}
+              ${
+                planData.items
+                  .map(
+                    (x) => `<tr class="${x.status === 'done' ? 'done-row' : ''}">
+                      <td><b class="${x.status === 'done' ? 'done-text' : ''}">${x.status === 'done' ? '✓ ' : ''}${x.recipe_name}</b></td>
+                      <td>${fmtNum(x.target_yield_amount)} ${x.yield_unit}</td>
+                      <td>${x.status || 'planned'}</td>
+                      <td>
+                        ${
+                          x.status === 'done'
+                            ? `<button class="btn danger" onclick="removeProductionItem(${x.id})">Remove</button>`
+                            : `<button class="btn" onclick="markProductionDone(${x.id})">Done</button>`
+                        }
+                      </td>
+                    </tr>`
+                  )
+                  .join('') || '<tr><td colspan="4">No items</td></tr>'
+              }
             </tbody>
           </table>
         </div>
@@ -714,6 +731,22 @@ async function renderProduction() {
     if (!plan) return;
     const res = await api(`/api/production-plans/${plan.id}/send-shortages`, { method: 'POST', body: '{}' });
     showToast(`Added ${res.added} shortages to grocery list #${res.grocery_list_id || '-'}`, 'success');
+    await refreshActiveTab();
+  };
+
+  window.markProductionDone = async function (itemId) {
+    await api(`/api/production-plan-items/${itemId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'done' }),
+    });
+    showToast('Production marked done and inventory deducted', 'success');
+    await refreshActiveTab();
+  };
+
+  window.removeProductionItem = async function (itemId) {
+    if (!confirm('Remove this production item from the list?')) return;
+    await api(`/api/production-plan-items/${itemId}`, { method: 'DELETE' });
+    showToast('Production item removed', 'success');
     await refreshActiveTab();
   };
 }

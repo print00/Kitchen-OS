@@ -91,7 +91,9 @@ def calc_plan_requirements(plan_id: int) -> list[dict[str, Any]]:
                r.name AS recipe_name, r.yield_amount
         FROM production_plan_items ppi
         JOIN recipes r ON r.id = ppi.recipe_id
+        LEFT JOIN production_item_progress pip ON pip.production_plan_item_id = ppi.id
         WHERE ppi.production_plan_id = ?
+          AND COALESCE(pip.status, 'planned') != 'done'
         """,
         (plan_id,),
     )
@@ -130,6 +132,83 @@ def calc_plan_requirements(plan_id: int) -> list[dict[str, Any]]:
         )
     output.sort(key=lambda x: x["name"])
     return output
+
+
+def apply_production_inventory_usage(plan_item_id: int, user_id: int) -> dict[str, Any]:
+    plan_item = query_one(
+        """
+        SELECT ppi.id, ppi.recipe_id, ppi.target_yield_amount, ppi.production_plan_id,
+               r.name AS recipe_name, r.yield_amount
+        FROM production_plan_items ppi
+        JOIN recipes r ON r.id = ppi.recipe_id
+        WHERE ppi.id = ?
+        """,
+        (plan_item_id,),
+    )
+    if not plan_item:
+        raise HTTPException(status_code=404, detail="Production item not found")
+
+    ratio = float(plan_item["target_yield_amount"]) / float(plan_item["yield_amount"])
+    ingredients = get_recipe_ingredients(int(plan_item["recipe_id"]))
+    shortages: list[dict[str, Any]] = []
+    usage_rows: list[dict[str, Any]] = []
+    for ing in ingredients:
+        required = round(float(ing["quantity"]) * ratio, 3)
+        inv = query_one(
+            "SELECT id, name, current_quantity FROM inventory_items WHERE id=?",
+            (ing["inventory_item_id"],),
+        )
+        if not inv:
+            raise HTTPException(status_code=400, detail=f"Missing inventory item id={ing['inventory_item_id']}")
+        available = float(inv["current_quantity"])
+        if available < required:
+            shortages.append(
+                {
+                    "inventory_item_id": inv["id"],
+                    "name": inv["name"],
+                    "required": required,
+                    "available": available,
+                }
+            )
+        usage_rows.append(
+            {
+                "inventory_item_id": inv["id"],
+                "name": inv["name"],
+                "required": required,
+                "available": available,
+                "new_quantity": round(available - required, 3),
+            }
+        )
+
+    if shortages:
+        names = ", ".join([f"{s['name']} (need {s['required']}, have {s['available']})" for s in shortages])
+        raise HTTPException(status_code=400, detail=f"Insufficient inventory for production: {names}")
+
+    for row in usage_rows:
+        execute(
+            "UPDATE inventory_items SET current_quantity=?, updated_at=? WHERE id=?",
+            (row["new_quantity"], now_iso(), row["inventory_item_id"]),
+        )
+        execute(
+            """
+            INSERT INTO inventory_transactions(
+              inventory_item_id, user_id, change_quantity, previous_quantity,
+              new_quantity, reason, source, notes, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["inventory_item_id"],
+                user_id,
+                -row["required"],
+                row["available"],
+                row["new_quantity"],
+                "production_used",
+                "production",
+                f"Used in production item {plan_item_id} ({plan_item['recipe_name']})",
+                now_iso(),
+            ),
+        )
+    return {"used_items": len(usage_rows)}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -948,9 +1027,12 @@ def get_production_plan(plan_id: int, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Plan not found")
     items = query_all(
         """
-        SELECT ppi.*, r.name AS recipe_name, r.yield_unit
+        SELECT ppi.*, r.name AS recipe_name, r.yield_unit,
+               COALESCE(pip.status, 'planned') AS status,
+               pip.completed_at, pip.completed_by
         FROM production_plan_items ppi
         JOIN recipes r ON r.id = ppi.recipe_id
+        LEFT JOIN production_item_progress pip ON pip.production_plan_item_id = ppi.id
         WHERE ppi.production_plan_id = ?
         """,
         (plan_id,),
@@ -977,6 +1059,61 @@ def add_production_item(plan_id: int, payload: dict, user=Depends(require_roles(
     )
     execute("UPDATE production_plans SET updated_at=? WHERE id=?", (now_iso(), plan_id))
     return {"id": iid}
+
+
+@app.patch("/api/production-plan-items/{item_id}/status")
+def update_production_item_status(item_id: int, payload: dict, user=Depends(require_roles("admin", "manager", "prep"))):
+    status = (payload.get("status") or "").strip().lower()
+    if status not in ["planned", "done"]:
+        raise HTTPException(status_code=400, detail="status must be planned or done")
+
+    item = query_one("SELECT id FROM production_plan_items WHERE id=?", (item_id,))
+    if not item:
+        raise HTTPException(status_code=404, detail="Production item not found")
+
+    current = query_one(
+        "SELECT status FROM production_item_progress WHERE production_plan_item_id=?",
+        (item_id,),
+    )
+    current_status = current["status"] if current else "planned"
+
+    if status == "done" and current_status != "done":
+        apply_production_inventory_usage(item_id, int(user["id"]))
+        execute(
+            """
+            INSERT INTO production_item_progress(production_plan_item_id, status, completed_at, completed_by, updated_at)
+            VALUES (?, 'done', ?, ?, ?)
+            ON CONFLICT(production_plan_item_id) DO UPDATE SET
+              status='done',
+              completed_at=excluded.completed_at,
+              completed_by=excluded.completed_by,
+              updated_at=excluded.updated_at
+            """,
+            (item_id, now_iso(), user["id"], now_iso()),
+        )
+    elif status == "planned":
+        execute(
+            """
+            INSERT INTO production_item_progress(production_plan_item_id, status, completed_at, completed_by, updated_at)
+            VALUES (?, 'planned', NULL, NULL, ?)
+            ON CONFLICT(production_plan_item_id) DO UPDATE SET
+              status='planned',
+              completed_at=NULL,
+              completed_by=NULL,
+              updated_at=excluded.updated_at
+            """,
+            (item_id, now_iso()),
+        )
+    return {"ok": True, "status": status}
+
+
+@app.delete("/api/production-plan-items/{item_id}")
+def delete_production_item(item_id: int, user=Depends(require_roles("admin", "manager", "prep"))):
+    item = query_one("SELECT id FROM production_plan_items WHERE id=?", (item_id,))
+    if not item:
+        raise HTTPException(status_code=404, detail="Production item not found")
+    execute("DELETE FROM production_plan_items WHERE id=?", (item_id,))
+    return {"ok": True}
 
 
 @app.post("/api/production-plans/{plan_id}/send-shortages")

@@ -116,6 +116,16 @@ CREATE TABLE IF NOT EXISTS production_plan_items (
   FOREIGN KEY(recipe_id) REFERENCES recipes(id)
 );
 
+CREATE TABLE IF NOT EXISTS production_item_progress (
+  production_plan_item_id INTEGER PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'planned',
+  completed_at TEXT,
+  completed_by INTEGER,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(production_plan_item_id) REFERENCES production_plan_items(id) ON DELETE CASCADE,
+  FOREIGN KEY(completed_by) REFERENCES users(id)
+);
+
 CREATE TABLE IF NOT EXISTS grocery_lists (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
