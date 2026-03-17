@@ -7,15 +7,15 @@ const state = {
 
 const roleCanEdit = () => ['admin', 'manager'].includes(state.user?.role);
 const tabMeta = {
-  dashboard: { label: 'Dashboard', icon: '🏠' },
-  recipes: { label: 'Recipes', icon: '📘' },
-  inventory: { label: 'Inventory', icon: '📦' },
-  production: { label: 'Production', icon: '🍳' },
-  grocery: { label: 'Grocery', icon: '🧾' },
-  prep: { label: 'Prep', icon: '✅' },
-  schedule: { label: 'Schedule', icon: '🗓️' },
-  analytics: { label: 'Analytics', icon: '📊' },
-  users: { label: 'Users', icon: '👥' },
+  dashboard: { label: 'Dashboard', shortLabel: 'Home' },
+  recipes: { label: 'Recipes', shortLabel: 'Recipes' },
+  inventory: { label: 'Inventory', shortLabel: 'Stock' },
+  production: { label: 'Production', shortLabel: 'Runs' },
+  grocery: { label: 'Grocery', shortLabel: 'Buy' },
+  prep: { label: 'Prep', shortLabel: 'Prep' },
+  schedule: { label: 'Schedule', shortLabel: 'Shifts' },
+  analytics: { label: 'Analytics', shortLabel: 'Stats' },
+  users: { label: 'Users', shortLabel: 'Users' },
 };
 
 function el(id) {
@@ -158,17 +158,26 @@ function pickCsvFile(onLoad) {
 
 function setTabs() {
   const tabs = state.tabs.filter((t) => !(t === 'users' && state.user?.role !== 'admin'));
-  const navHtml = tabs
+  const desktopNavHtml = tabs
     .map((t) => {
-      const meta = tabMeta[t] || { label: t, icon: '•' };
+      const meta = tabMeta[t] || { label: t, shortLabel: t };
       return `<button class="tab-btn ${state.activeTab === t ? 'active' : ''}" onclick="switchTab('${t}')" aria-label="${meta.label}">
-        <span class="tab-icon" aria-hidden="true">${meta.icon}</span>
-        <span>${meta.label}</span>
+        <span class="tab-copy">
+          <span class="tab-label">${meta.label}</span>
+        </span>
       </button>`;
     })
     .join('');
-  el('tabs').innerHTML = navHtml;
-  if (el('mobileTabs')) el('mobileTabs').innerHTML = navHtml;
+  const mobileNavHtml = tabs
+    .map((t) => {
+      const meta = tabMeta[t] || { label: t, shortLabel: t };
+      return `<button class="tab-btn ${state.activeTab === t ? 'active' : ''}" onclick="switchTab('${t}')" aria-label="${meta.label}">
+        <span class="tab-label">${meta.shortLabel}</span>
+      </button>`;
+    })
+    .join('');
+  el('tabs').innerHTML = desktopNavHtml;
+  if (el('mobileTabs')) el('mobileTabs').innerHTML = mobileNavHtml;
 }
 
 function switchTab(tab) {
