@@ -286,7 +286,7 @@ def dashboard(user=Depends(get_current_user)):
 
 
 @app.get("/api/users")
-def list_users(user=Depends(require_roles("admin"))):
+def list_users(user=Depends(require_roles("admin", "manager"))):
     return query_all(
         """
         SELECT u.id, u.username, u.full_name, u.active, r.name AS role, u.created_at
@@ -351,6 +351,28 @@ def update_user(user_id: int, payload: dict, user=Depends(require_roles("admin")
         execute("UPDATE users SET active=? WHERE id=?", (1 if active else 0, user_id))
     if password:
         execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), user_id))
+    return {"ok": True}
+
+
+@app.delete("/api/users/{user_id}")
+def delete_user(user_id: int, user=Depends(require_roles("admin", "manager"))):
+    target = query_one(
+        """
+        SELECT u.id, u.full_name, r.name AS role
+        FROM users u
+        JOIN roles r ON r.id = u.role_id
+        WHERE u.id=?
+        """,
+        (user_id,),
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if int(target["id"]) == int(user["id"]):
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    if user["role"] == "manager" and target["role"] == "admin":
+        raise HTTPException(status_code=403, detail="Managers cannot delete admin users")
+
+    execute("DELETE FROM users WHERE id=?", (user_id,))
     return {"ok": True}
 
 

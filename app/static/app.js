@@ -8,6 +8,7 @@ const state = {
 };
 
 const roleCanEdit = () => ['admin', 'manager'].includes(state.user?.role);
+const roleCanManageUsers = () => ['admin', 'manager'].includes(state.user?.role);
 const tabMeta = {
   dashboard: { label: 'Dashboard', shortLabel: 'Home' },
   recipes: { label: 'Recipes', shortLabel: 'Recipes' },
@@ -485,7 +486,7 @@ function setupAppFormModal() {
 }
 
 function setTabs() {
-  const tabs = state.tabs.filter((t) => !(t === 'users' && state.user?.role !== 'admin'));
+  const tabs = state.tabs.filter((t) => !(t === 'users' && !roleCanManageUsers()));
   const desktopNavHtml = tabs
     .map((t) => {
       const meta = tabMeta[t] || { label: t, shortLabel: t };
@@ -1585,8 +1586,8 @@ async function renderSchedule() {
 }
 
 async function renderUsers() {
-  if (state.user?.role !== 'admin') {
-    el('users').innerHTML = '<div class="card"><p>Admin only.</p></div>';
+  if (!roleCanManageUsers()) {
+    el('users').innerHTML = '<div class="card"><p>Managers and admins only.</p></div>';
     return;
   }
   const users = await api('/api/users');
@@ -1594,11 +1595,22 @@ async function renderUsers() {
     <div class="card">
       <div class="row between">
         <h3>Users</h3>
-        <button class="btn" onclick="createUser()">Create User</button>
+        ${state.user?.role === 'admin' ? '<button class="btn" onclick="createUser()">Create User</button>' : ''}
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Active</th></tr></thead>
-        <tbody>${users.map((u) => `<tr><td>${u.username}</td><td>${u.full_name}</td><td>${u.role}</td><td>${u.active ? 'Yes' : 'No'}</td></tr>`).join('')}</tbody>
+        <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Active</th><th>Actions</th></tr></thead>
+        <tbody>${users
+          .map((u) => {
+            const canDelete = u.id !== state.user?.id && (state.user?.role === 'admin' || u.role !== 'admin');
+            return `<tr>
+              <td>${u.username}</td>
+              <td>${u.full_name}</td>
+              <td>${u.role}</td>
+              <td>${u.active ? 'Yes' : 'No'}</td>
+              <td>${canDelete ? `<button class="btn danger" onclick="deleteUser(${u.id}, '${escapeHtml(u.full_name)}')">Delete</button>` : '<small>Protected</small>'}</td>
+            </tr>`;
+          })
+          .join('')}</tbody>
       </table></div>
     </div>
   `;
@@ -1644,6 +1656,13 @@ async function renderUsers() {
         },
       },
     });
+  };
+
+  window.deleteUser = async function (userId, fullName) {
+    if (!confirm(`Delete ${fullName || 'this user'}?`)) return;
+    await api(`/api/users/${userId}`, { method: 'DELETE' });
+    showToast('User deleted', 'success');
+    await refreshActiveTab();
   };
 }
 
