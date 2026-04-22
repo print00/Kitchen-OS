@@ -3,6 +3,7 @@ const state = {
   user: null,
   activeTab: 'dashboard',
   tabs: ['dashboard', 'recipes', 'inventory', 'production', 'grocery', 'prep', 'schedule', 'analytics', 'users'],
+  recipeFormInventory: [],
 };
 
 const roleCanEdit = () => ['admin', 'manager'].includes(state.user?.role);
@@ -154,6 +155,216 @@ function pickCsvFile(onLoad) {
     reader.readAsText(file);
   };
   input.click();
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function getRecipeFormModal() {
+  return el('recipeFormModal');
+}
+
+function closeRecipeFormModal() {
+  const modal = getRecipeFormModal();
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.dataset.mode = '';
+  modal.dataset.recipeId = '';
+}
+
+function renderRecipeIngredientRows(ingredients = []) {
+  const rowsRoot = el('recipeIngredientRows');
+  if (!rowsRoot) return;
+  if (!ingredients.length) {
+    rowsRoot.innerHTML = '<p><small>No ingredients added yet. Use "Add Ingredient" to build the recipe.</small></p>';
+    return;
+  }
+
+  const options = state.recipeFormInventory
+    .map(
+      (item) =>
+        `<option value="${item.id}">${escapeHtml(item.name)} (${escapeHtml(item.base_unit)})</option>`
+    )
+    .join('');
+
+  rowsRoot.innerHTML = ingredients
+    .map(
+      (ingredient, idx) => `
+        <div class="ingredient-row" data-index="${idx}">
+          <div>
+            <label>Inventory item</label>
+            <select class="ingredient-item-select">
+              <option value="">Choose an inventory item</option>
+              ${options}
+            </select>
+          </div>
+          <div>
+            <label>Quantity</label>
+            <input class="ingredient-qty-input" type="number" min="0" step="0.01" value="${escapeHtml(ingredient.quantity ?? '')}" />
+          </div>
+          <div>
+            <label>Unit</label>
+            <input class="ingredient-unit-input" value="${escapeHtml(ingredient.unit ?? '')}" placeholder="kg" />
+          </div>
+          <div>
+            <label>Prep note</label>
+            <input class="ingredient-note-input" value="${escapeHtml(ingredient.prep_note ?? '')}" placeholder="Diced, toasted, chilled..." />
+          </div>
+          <button class="btn danger remove-ingredient-btn" type="button">Remove</button>
+        </div>
+      `
+    )
+    .join('');
+
+  Array.from(rowsRoot.querySelectorAll('.ingredient-row')).forEach((row, idx) => {
+    const ingredient = ingredients[idx] || {};
+    const select = row.querySelector('.ingredient-item-select');
+    const unitInput = row.querySelector('.ingredient-unit-input');
+    if (select) {
+      select.value = ingredient.inventory_item_id ? String(ingredient.inventory_item_id) : '';
+      select.addEventListener('change', () => {
+        const selected = state.recipeFormInventory.find((item) => item.id === Number(select.value));
+        if (selected && unitInput && !unitInput.value.trim()) unitInput.value = selected.base_unit || '';
+      });
+    }
+    row.querySelector('.remove-ingredient-btn')?.addEventListener('click', () => {
+      const current = collectRecipeIngredientDraft();
+      current.splice(idx, 1);
+      renderRecipeIngredientRows(current);
+    });
+  });
+}
+
+function collectRecipeIngredientDraft() {
+  const rows = Array.from(document.querySelectorAll('#recipeIngredientRows .ingredient-row'));
+  return rows.map((row) => ({
+    inventory_item_id: Number(row.querySelector('.ingredient-item-select')?.value || '0') || null,
+    quantity: row.querySelector('.ingredient-qty-input')?.value || '',
+    unit: row.querySelector('.ingredient-unit-input')?.value || '',
+    prep_note: row.querySelector('.ingredient-note-input')?.value || '',
+  }));
+}
+
+function addRecipeIngredientRow() {
+  const current = collectRecipeIngredientDraft();
+  current.push({ inventory_item_id: null, quantity: '', unit: '', prep_note: '' });
+  renderRecipeIngredientRows(current);
+}
+
+function getRecipeFormPayload() {
+  const name = (el('recipeNameInput')?.value || '').trim();
+  const category = (el('recipeCategoryInput')?.value || 'prep').trim() || 'prep';
+  const yield_amount = Number(el('recipeYieldAmountInput')?.value || '0');
+  const yield_unit = (el('recipeYieldUnitInput')?.value || 'kg').trim() || 'kg';
+  const portion_size = (el('recipePortionSizeInput')?.value || '').trim();
+  const instructions = el('recipeInstructionsInput')?.value || '';
+
+  if (!name) throw new Error('Recipe name is required');
+  if (!Number.isFinite(yield_amount) || yield_amount <= 0) throw new Error('Yield amount must be greater than 0');
+
+  const ingredients = collectRecipeIngredientDraft()
+    .filter((item) => item.inventory_item_id || String(item.quantity).trim() || item.prep_note.trim() || item.unit.trim())
+    .map((item) => {
+      const quantity = Number(item.quantity || '0');
+      if (!item.inventory_item_id) throw new Error('Each ingredient row needs an inventory item');
+      if (!Number.isFinite(quantity) || quantity < 0) throw new Error('Ingredient quantity must be a non-negative number');
+      const selected = state.recipeFormInventory.find((inv) => inv.id === Number(item.inventory_item_id));
+      return {
+        inventory_item_id: Number(item.inventory_item_id),
+        quantity,
+        unit: item.unit.trim() || selected?.base_unit || '',
+        prep_note: item.prep_note.trim(),
+      };
+    });
+
+  return {
+    name,
+    category,
+    yield_amount,
+    yield_unit,
+    portion_size: portion_size || null,
+    instructions,
+    ingredients,
+  };
+}
+
+function openRecipeFormModal({ mode, recipe = null, inventory = [] }) {
+  state.recipeFormInventory = inventory;
+  const modal = getRecipeFormModal();
+  if (!modal) return;
+
+  modal.dataset.mode = mode;
+  modal.dataset.recipeId = recipe?.id ? String(recipe.id) : '';
+  el('recipeFormTitle').textContent = mode === 'edit' ? `Edit ${recipe?.name || 'Recipe'}` : 'Create Recipe';
+  el('recipeFormSubmit').textContent = mode === 'edit' ? 'Save Changes' : 'Create Recipe';
+  el('recipeNameInput').value = recipe?.name || '';
+  el('recipeCategoryInput').value = recipe?.category || 'prep';
+  el('recipeYieldAmountInput').value = recipe?.yield_amount ?? 1;
+  el('recipeYieldUnitInput').value = recipe?.yield_unit || 'kg';
+  el('recipePortionSizeInput').value = recipe?.portion_size || '';
+  el('recipeInstructionsInput').value = recipe?.instructions || '';
+  renderRecipeIngredientRows(
+    recipe?.ingredients?.map((item) => ({
+      inventory_item_id: item.inventory_item_id,
+      quantity: item.quantity,
+      unit: item.unit,
+      prep_note: item.prep_note || '',
+    })) || []
+  );
+  modal.classList.remove('hidden');
+  el('recipeNameInput')?.focus();
+}
+
+function setupRecipeFormModal() {
+  const modal = getRecipeFormModal();
+  if (!modal || modal.dataset.bound) return;
+  modal.dataset.bound = '1';
+
+  el('recipeFormClose')?.addEventListener('click', closeRecipeFormModal);
+  el('recipeFormCancel')?.addEventListener('click', closeRecipeFormModal);
+  el('addIngredientRowBtn')?.addEventListener('click', addRecipeIngredientRow);
+
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeRecipeFormModal();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !modal.classList.contains('hidden')) closeRecipeFormModal();
+  });
+
+  el('recipeForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const submitBtn = el('recipeFormSubmit');
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      const payload = getRecipeFormPayload();
+      if (modal.dataset.mode === 'edit' && modal.dataset.recipeId) {
+        await api(`/api/recipes/${modal.dataset.recipeId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+        showToast('Recipe updated', 'success');
+      } else {
+        await api('/api/recipes', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        showToast('Recipe created', 'success');
+      }
+      closeRecipeFormModal();
+      await refreshActiveTab();
+    } catch (err) {
+      showToast(err.message || 'Unable to save recipe', 'error');
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  });
 }
 
 function setTabs() {
@@ -417,76 +628,24 @@ async function renderRecipes() {
   `;
 
   window.openRecipeForm = async function () {
-    const name = (prompt('Recipe name') || '').trim();
-    if (!name) return;
-    const category = (prompt('Category', 'prep') || 'prep').trim();
-    const yield_amount = Number(prompt('Yield amount (>0)', '1'));
-    if (!Number.isFinite(yield_amount) || yield_amount <= 0) {
-      showToast('Yield amount must be greater than 0', 'error');
-      return;
-    }
-    const yield_unit = (prompt('Yield unit', 'kg') || 'kg').trim();
-    const instructions = prompt('Instructions', '1) Prep\n2) Cook') || '';
-
-    const inventoryLines = inventory.map((i) => `${i.id}:${i.name}(${i.base_unit})`).join('\n');
-    const ingredients = [];
-    while (true) {
-      const idVal = prompt(`Ingredient inventory ID (Cancel to stop):\n${inventoryLines}`);
-      if (!idVal) break;
-      const inv = inventory.find((x) => x.id === Number(idVal));
-      if (!inv) {
-        showToast('Invalid inventory ID', 'error');
-        continue;
-      }
-      const quantity = Number(prompt(`Quantity for ${inv.name}`, '1'));
-      if (!Number.isFinite(quantity) || quantity < 0) {
-        showToast('Quantity must be a non-negative number', 'error');
-        continue;
-      }
-      const prep_note = prompt('Prep note', '') || '';
-      ingredients.push({ inventory_item_id: inv.id, quantity, unit: inv.base_unit, prep_note });
-    }
-
-    await api('/api/recipes', {
-      method: 'POST',
-      body: JSON.stringify({ name, category, yield_amount, yield_unit, instructions, ingredients }),
+    openRecipeFormModal({
+      mode: 'create',
+      inventory,
+      recipe: {
+        name: '',
+        category: 'prep',
+        yield_amount: 1,
+        yield_unit: 'kg',
+        portion_size: '',
+        instructions: '',
+        ingredients: [],
+      },
     });
-    showToast('Recipe created', 'success');
-    await refreshActiveTab();
   };
 
   window.editRecipe = async function (id) {
     const r = await api(`/api/recipes/${id}`);
-    const name = (prompt('Recipe name', r.name) || '').trim();
-    if (!name) return;
-    const category = (prompt('Category', r.category) || r.category).trim();
-    const yield_amount = Number(prompt('Yield amount (>0)', String(r.yield_amount)));
-    if (!Number.isFinite(yield_amount) || yield_amount <= 0) {
-      showToast('Yield amount must be greater than 0', 'error');
-      return;
-    }
-    const yield_unit = (prompt('Yield unit', r.yield_unit) || r.yield_unit).trim();
-    const portion_size = prompt('Portion size', r.portion_size || '') || '';
-    const instructions = prompt('Instructions', r.instructions || '') || '';
-    await api(`/api/recipes/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        name,
-        category,
-        yield_amount,
-        yield_unit,
-        portion_size,
-        instructions,
-        ingredients: r.ingredients.map((i) => ({
-          inventory_item_id: i.inventory_item_id,
-          quantity: i.quantity,
-          unit: i.unit,
-          prep_note: i.prep_note || '',
-        })),
-      }),
-    });
-    showToast('Recipe updated', 'success');
-    await refreshActiveTab();
+    openRecipeFormModal({ mode: 'edit', recipe: r, inventory });
   };
 
   window.deleteRecipe = async function (id) {
@@ -1027,4 +1186,5 @@ async function renderAnalytics() {
   `;
 }
 
+setupRecipeFormModal();
 bootSession();

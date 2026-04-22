@@ -52,32 +52,16 @@ p {
 }
 
 .brand-block {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  display: block;
   padding: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
-.brand-mark {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: linear-gradient(145deg, #0ea5a4, #2563eb);
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-weight: 700;
-}
-
-.brand-title {
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.brand-sub {
-  font-size: 12px;
-  color: #94a3b8;
+.brand-logo {
+  width: 100%;
+  max-width: 188px;
+  display: block;
+  height: auto;
 }
 
 .sidebar-tabs,
@@ -150,6 +134,17 @@ p {
 .header-meta h2 {
   font-size: 20px;
   font-weight: 700;
+}
+
+.header-meta {
+  display: grid;
+  gap: 6px;
+}
+
+.header-logo {
+  width: min(220px, 100%);
+  height: auto;
+  display: block;
 }
 
 #sessionInfo {
@@ -353,6 +348,13 @@ tbody tr:hover {
   width: min(460px, 100%);
   display: grid;
   gap: 10px;
+  justify-items: start;
+}
+
+.login-logo {
+  width: min(260px, 78vw);
+  height: auto;
+  display: block;
 }
 
 .eyebrow {
@@ -418,6 +420,125 @@ tbody tr:hover {
 .toast.show {
   opacity: 1;
   transform: translateY(0);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.56);
+  backdrop-filter: blur(6px);
+  z-index: 1300;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.modal-panel {
+  width: min(1100px, 100%);
+  max-height: min(90vh, 920px);
+  overflow: auto;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 24px;
+  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.28);
+}
+
+.recipe-modal-panel {
+  padding: 24px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.modal-header h2 {
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.recipe-form {
+  display: grid;
+  gap: 18px;
+}
+
+.recipe-form-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.95fr) minmax(0, 1.45fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.recipe-form-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow-sm);
+  padding: 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.recipe-form-card h3 {
+  margin-bottom: 2px;
+}
+
+.recipe-editor-card small,
+.recipe-ingredients-card small {
+  color: var(--muted);
+}
+
+.recipe-editor {
+  min-height: 360px;
+  resize: vertical;
+  padding: 18px;
+  border-radius: 16px;
+  border: 1px solid #cbd5e1;
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(180deg, rgba(14, 165, 164, 0.16), rgba(37, 99, 235, 0.08)) border-box;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+.recipe-ingredient-rows {
+  display: grid;
+  gap: 12px;
+}
+
+.ingredient-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(110px, 0.55fr) minmax(90px, 0.45fr) minmax(200px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+}
+
+.ingredient-row label {
+  margin-bottom: 6px;
+}
+
+.ingredient-row select,
+.ingredient-row input {
+  margin-bottom: 0;
+}
+
+.ingredient-row .btn {
+  min-width: 96px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
 }
 
 .toast.success {
@@ -557,12 +678,24 @@ pre {
     grid-template-columns: 1fr;
   }
 
+  .recipe-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ingredient-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .app-header {
     padding: 10px 12px;
   }
 
   .header-meta h2 {
     font-size: 18px;
+  }
+
+  .header-logo {
+    width: min(180px, 45vw);
   }
 
   .mobile-sticky-actions {
@@ -622,12 +755,45 @@ pre {
   }
 }
 
+@media (max-width: 680px) {
+  .modal-backdrop {
+    padding: 12px;
+  }
+
+  .recipe-modal-panel {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .modal-header h2 {
+    font-size: 24px;
+  }
+
+  .ingredient-row,
+  .modal-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-actions {
+    display: grid;
+  }
+
+  .modal-actions .btn {
+    width: 100%;
+  }
+
+  .recipe-editor {
+    min-height: 280px;
+  }
+}
+
 @media print {
   .app-sidebar,
   .mobile-tabs,
   .app-header .btn,
   .icon-btn,
-  .toast-container {
+  .toast-container,
+  .modal-backdrop {
     display: none !important;
   }
 
