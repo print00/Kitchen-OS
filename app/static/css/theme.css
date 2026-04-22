@@ -442,6 +442,10 @@ tbody tr:hover {
   padding: 24px;
 }
 
+.app-form-modal-panel {
+  padding: 24px;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -453,6 +457,12 @@ tbody tr:hover {
 .modal-header h2 {
   font-size: 28px;
   line-height: 1.1;
+}
+
+.modal-subtitle {
+  color: var(--muted);
+  margin-top: 8px;
+  max-width: 72ch;
 }
 
 .recipe-form {
@@ -534,6 +544,40 @@ tbody tr:hover {
   justify-content: flex-end;
   gap: 10px;
   padding-top: 4px;
+}
+
+.app-form-shell {
+  display: grid;
+  gap: 20px;
+}
+
+.app-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.app-form-field {
+  display: grid;
+  gap: 8px;
+}
+
+.app-form-field.full {
+  grid-column: 1 / -1;
+}
+
+.app-form-field label {
+  font-weight: 700;
+}
+
+.app-form-field textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+
+.form-hint {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .toast.success {
@@ -674,6 +718,10 @@ pre {
   }
 
   .recipe-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-form-grid {
     grid-template-columns: 1fr;
   }
 

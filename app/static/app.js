@@ -4,6 +4,7 @@ const state = {
   activeTab: 'dashboard',
   tabs: ['dashboard', 'recipes', 'inventory', 'production', 'grocery', 'prep', 'schedule', 'analytics', 'users'],
   recipeFormInventory: [],
+  appFormSubmit: null,
 };
 
 const roleCanEdit = () => ['admin', 'manager'].includes(state.user?.role);
@@ -367,6 +368,122 @@ function setupRecipeFormModal() {
   });
 }
 
+function getAppFormModal() {
+  return el('appFormModal');
+}
+
+function closeAppFormModal() {
+  const modal = getAppFormModal();
+  if (!modal) return;
+  modal.classList.add('hidden');
+  state.appFormSubmit = null;
+  el('appFormFields').innerHTML = '';
+  el('appForm')?.reset();
+}
+
+function renderAppFormField(field, value = '') {
+  const fieldId = `app-field-${field.name}`;
+  const common = [
+    `id="${fieldId}"`,
+    `name="${field.name}"`,
+    field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : '',
+    field.required ? 'required' : '',
+    field.min !== undefined ? `min="${field.min}"` : '',
+    field.max !== undefined ? `max="${field.max}"` : '',
+    field.step !== undefined ? `step="${field.step}"` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  let control = '';
+  if (field.type === 'select') {
+    const emptyOption = field.emptyLabel !== undefined ? `<option value="">${escapeHtml(field.emptyLabel)}</option>` : '';
+    const options = (field.options || [])
+      .map((option) => {
+        const selected = String(option.value) === String(value) ? 'selected' : '';
+        return `<option value="${escapeHtml(option.value)}" ${selected}>${escapeHtml(option.label)}</option>`;
+      })
+      .join('');
+    control = `<select ${common}>${emptyOption}${options}</select>`;
+  } else if (field.type === 'textarea') {
+    control = `<textarea ${common} rows="${field.rows || 6}">${escapeHtml(value)}</textarea>`;
+  } else {
+    const inputType = field.type || 'text';
+    control = `<input type="${inputType}" value="${escapeHtml(value)}" ${common} />`;
+  }
+
+  return `
+    <div class="app-form-field ${field.fullWidth ? 'full' : ''}">
+      <label for="${fieldId}">${escapeHtml(field.label)}</label>
+      ${control}
+      ${field.hint ? `<p class="form-hint">${escapeHtml(field.hint)}</p>` : ''}
+    </div>
+  `;
+}
+
+function readAppFormValues(fields) {
+  const form = el('appForm');
+  const values = {};
+  for (const field of fields) {
+    const input = form?.elements.namedItem(field.name);
+    values[field.name] = input ? input.value : '';
+  }
+  return values;
+}
+
+function openAppFormModal(config) {
+  const modal = getAppFormModal();
+  if (!modal) return;
+
+  el('appFormEyebrow').textContent = config.eyebrow || 'Workspace';
+  el('appFormTitle').textContent = config.title || 'Create';
+  el('appFormSubtitle').textContent = config.subtitle || '';
+  el('appFormSubmit').textContent = config.submitLabel || 'Save';
+  el('appFormFields').innerHTML = (config.fields || [])
+    .map((field) => renderAppFormField(field, config.initialValues?.[field.name] ?? field.value ?? ''))
+    .join('');
+
+  state.appFormSubmit = config.onSubmit;
+  modal.classList.remove('hidden');
+  const firstInput = el('appForm')?.querySelector('input, select, textarea');
+  firstInput?.focus();
+}
+
+function setupAppFormModal() {
+  const modal = getAppFormModal();
+  if (!modal || modal.dataset.bound) return;
+  modal.dataset.bound = '1';
+
+  el('appFormClose')?.addEventListener('click', closeAppFormModal);
+  el('appFormCancel')?.addEventListener('click', closeAppFormModal);
+
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeAppFormModal();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !modal.classList.contains('hidden')) closeAppFormModal();
+  });
+
+  el('appForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const submitBtn = el('appFormSubmit');
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      const fields = state.appFormSubmit?.fields || [];
+      const values = readAppFormValues(fields);
+      if (typeof state.appFormSubmit?.handler === 'function') {
+        await state.appFormSubmit.handler(values);
+      }
+      closeAppFormModal();
+    } catch (err) {
+      showToast(err.message || 'Unable to save changes', 'error');
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  });
+}
+
 function setTabs() {
   const tabs = state.tabs.filter((t) => !(t === 'users' && state.user?.role !== 'admin'));
   const desktopNavHtml = tabs
@@ -536,13 +653,48 @@ async function removePrepTask(id) {
 }
 
 async function quickAddTask(listType) {
-  const title = prompt('Task title');
-  if (!title) return;
-  await api('/api/prep-tasks', {
-    method: 'POST',
-    body: JSON.stringify({ title, list_type: listType, priority: 'med', status: 'todo' }),
+  openAppFormModal({
+    eyebrow: 'Quick Action',
+    title: listType === 'additional' ? 'Add Additional Prep Task' : 'Add Daily Prep Task',
+    subtitle: 'Capture a prep task without leaving the dashboard.',
+    submitLabel: 'Add Task',
+    fields: [
+      { name: 'title', label: 'Task title', type: 'text', required: true, fullWidth: true, placeholder: 'Example: Portion chicken for dinner service' },
+      {
+        name: 'priority',
+        label: 'Priority',
+        type: 'select',
+        options: [
+          { value: 'low', label: 'Low' },
+          { value: 'med', label: 'Medium' },
+          { value: 'high', label: 'High' },
+        ],
+      },
+      { name: 'due_time', label: 'Due time', type: 'time' },
+      { name: 'notes', label: 'Notes', type: 'textarea', rows: 4, fullWidth: true, placeholder: 'Optional handoff or prep notes' },
+    ],
+    initialValues: { priority: 'med' },
+    onSubmit: {
+      fields: [{ name: 'title' }, { name: 'priority' }, { name: 'due_time' }, { name: 'notes' }],
+      handler: async (values) => {
+        const title = (values.title || '').trim();
+        if (!title) throw new Error('Task title is required');
+        await api('/api/prep-tasks', {
+          method: 'POST',
+          body: JSON.stringify({
+            title,
+            list_type: listType,
+            priority: values.priority || 'med',
+            due_time: values.due_time || null,
+            notes: values.notes || '',
+            status: 'todo',
+          }),
+        });
+        showToast('Task added', 'success');
+        await refreshActiveTab();
+      },
+    },
   });
-  await refreshActiveTab();
 }
 
 async function quickAddGrocery() {
@@ -552,29 +704,90 @@ async function quickAddGrocery() {
     const created = await api('/api/grocery-lists', { method: 'POST', body: JSON.stringify({}) });
     listId = created.id;
   }
-  const name = prompt('Grocery item name');
-  if (!name) return;
-  const qty = Number(prompt('Quantity', '1') || '1');
-  const unit = prompt('Unit', 'kg') || 'kg';
-  await api(`/api/grocery-lists/${listId}/items`, {
-    method: 'POST',
-    body: JSON.stringify({ name, quantity: qty, unit }),
+  openAppFormModal({
+    eyebrow: 'Quick Action',
+    title: 'Add Grocery Item',
+    subtitle: 'Create a grocery request from the dashboard with a proper form.',
+    submitLabel: 'Add Item',
+    fields: [
+      { name: 'name', label: 'Item name', type: 'text', required: true, fullWidth: true, placeholder: 'Example: Roma tomatoes' },
+      { name: 'quantity', label: 'Quantity', type: 'number', min: 0.01, step: 0.01, required: true },
+      { name: 'unit', label: 'Unit', type: 'text', required: true, placeholder: 'kg' },
+      { name: 'vendor', label: 'Vendor', type: 'text', fullWidth: true, placeholder: 'Optional supplier' },
+    ],
+    initialValues: { quantity: 1, unit: 'kg' },
+    onSubmit: {
+      fields: [{ name: 'name' }, { name: 'quantity' }, { name: 'unit' }, { name: 'vendor' }],
+      handler: async (values) => {
+        const quantity = Number(values.quantity || '0');
+        if (!(quantity > 0)) throw new Error('Quantity must be greater than 0');
+        await api(`/api/grocery-lists/${listId}/items`, {
+          method: 'POST',
+          body: JSON.stringify({
+            name: (values.name || '').trim(),
+            quantity,
+            unit: (values.unit || 'kg').trim() || 'kg',
+            vendor: (values.vendor || '').trim(),
+          }),
+        });
+        showToast('Added to grocery list', 'success');
+        await refreshActiveTab();
+      },
+    },
   });
-  showToast('Added to grocery list', 'success');
 }
 
 async function quickAdjustInventory() {
   const items = await api('/api/inventory');
-  const names = items.map((x) => `${x.id}:${x.name}`).join('\n');
-  const id = Number(prompt(`Enter inventory item id:\n${names}`));
-  if (!id) return;
-  const change = Number(prompt('Change quantity (+/-)', '-1'));
-  const reason = prompt('Reason (waste/received/counted/transferred/adjustment)', 'adjustment') || 'adjustment';
-  await api(`/api/inventory/${id}/adjust`, {
-    method: 'POST',
-    body: JSON.stringify({ change_quantity: change, reason, source: 'quick_action' }),
+  openAppFormModal({
+    eyebrow: 'Quick Action',
+    title: 'Adjust Inventory',
+    subtitle: 'Pick an item and log the quantity change without browser dialogs.',
+    submitLabel: 'Save Adjustment',
+    fields: [
+      {
+        name: 'inventory_item_id',
+        label: 'Inventory item',
+        type: 'select',
+        required: true,
+        fullWidth: true,
+        emptyLabel: 'Choose an item',
+        options: items.map((item) => ({
+          value: item.id,
+          label: `${item.name} (${fmtNum(item.current_quantity)} ${item.base_unit})`,
+        })),
+      },
+      { name: 'change_quantity', label: 'Change quantity', type: 'number', step: 0.01, required: true, hint: 'Use negative values for waste or shrinkage.' },
+      {
+        name: 'reason',
+        label: 'Reason',
+        type: 'select',
+        options: [
+          { value: 'adjustment', label: 'Adjustment' },
+          { value: 'waste', label: 'Waste' },
+          { value: 'received', label: 'Received' },
+          { value: 'counted', label: 'Counted' },
+          { value: 'transferred', label: 'Transferred' },
+        ],
+      },
+    ],
+    initialValues: { change_quantity: -1, reason: 'adjustment' },
+    onSubmit: {
+      fields: [{ name: 'inventory_item_id' }, { name: 'change_quantity' }, { name: 'reason' }],
+      handler: async (values) => {
+        const id = Number(values.inventory_item_id || '0');
+        const change = Number(values.change_quantity || '0');
+        if (!id) throw new Error('Select an inventory item');
+        if (!Number.isFinite(change) || change === 0) throw new Error('Change quantity cannot be 0');
+        await api(`/api/inventory/${id}/adjust`, {
+          method: 'POST',
+          body: JSON.stringify({ change_quantity: change, reason: values.reason || 'adjustment', source: 'quick_action' }),
+        });
+        showToast('Inventory adjusted', 'success');
+        await refreshActiveTab();
+      },
+    },
   });
-  await refreshActiveTab();
 }
 
 async function renderRecipes() {
@@ -671,15 +884,40 @@ async function renderRecipes() {
   };
 
   window.scaleRecipe = async function (id) {
-    const target = Number(prompt('Target yield amount', '1'));
-    if (!target) return;
-    const scaled = await api(`/api/recipes/${id}/scale?target_yield=${target}`);
-    alert(scaled.scaled_ingredients.map((x) => `${x.ingredient}: ${fmtNum(x.quantity)} ${x.unit}`).join('\n'));
+    openAppFormModal({
+      eyebrow: 'Recipes',
+      title: 'Scale Recipe',
+      subtitle: 'Enter the target yield and review the scaled ingredient list below.',
+      submitLabel: 'Scale Recipe',
+      fields: [{ name: 'target_yield', label: 'Target yield amount', type: 'number', min: 0.01, step: 0.01, required: true }],
+      initialValues: { target_yield: 1 },
+      onSubmit: {
+        fields: [{ name: 'target_yield' }],
+        handler: async (values) => {
+          const target = Number(values.target_yield || '0');
+          if (!(target > 0)) throw new Error('Target yield amount must be greater than 0');
+          const scaled = await api(`/api/recipes/${id}/scale?target_yield=${target}`);
+          el('recipeDetails').innerHTML = `
+            <div class="card mt">
+              <h4>${escapeHtml(scaled.recipe_name)} scaled to ${fmtNum(scaled.target_yield)} ${escapeHtml(scaled.yield_unit)}</h4>
+              <ul>
+                ${scaled.scaled_ingredients.map((x) => `<li>${escapeHtml(x.ingredient)}: ${fmtNum(x.quantity)} ${escapeHtml(x.unit)}</li>`).join('')}
+              </ul>
+            </div>
+          `;
+        },
+      },
+    });
   };
 
   window.exportRecipe = async function (id) {
     const txt = await api(`/api/recipes/${id}/export`);
-    alert(txt);
+    el('recipeDetails').innerHTML = `
+      <div class="card mt">
+        <h4>Recipe Export</h4>
+        <pre>${escapeHtml(txt)}</pre>
+      </div>
+    `;
   };
 
   window.duplicateRecipe = async function (id) {
@@ -758,40 +996,82 @@ async function renderInventory() {
   `;
 
   window.adjustItem = async function (id) {
-    const change = Number(prompt('Change quantity (+/-)', '-1'));
-    const reason = prompt('Reason', 'adjustment') || 'adjustment';
-    await api(`/api/inventory/${id}/adjust`, {
-      method: 'POST',
-      body: JSON.stringify({ change_quantity: change, reason, source: 'inventory_tab' }),
+    const item = items.find((row) => row.id === id);
+    openAppFormModal({
+      eyebrow: 'Inventory',
+      title: `Adjust ${item?.name || 'Item'}`,
+      subtitle: 'Log the quantity update with a cleaner adjustment form.',
+      submitLabel: 'Save Adjustment',
+      fields: [
+        { name: 'change_quantity', label: 'Change quantity', type: 'number', step: 0.01, required: true },
+        {
+          name: 'reason',
+          label: 'Reason',
+          type: 'select',
+          options: [
+            { value: 'adjustment', label: 'Adjustment' },
+            { value: 'waste', label: 'Waste' },
+            { value: 'received', label: 'Received' },
+            { value: 'counted', label: 'Counted' },
+            { value: 'transferred', label: 'Transferred' },
+          ],
+        },
+      ],
+      initialValues: { change_quantity: -1, reason: 'adjustment' },
+      onSubmit: {
+        fields: [{ name: 'change_quantity' }, { name: 'reason' }],
+        handler: async (values) => {
+          const change = Number(values.change_quantity || '0');
+          if (!Number.isFinite(change) || change === 0) throw new Error('Change quantity cannot be 0');
+          await api(`/api/inventory/${id}/adjust`, {
+            method: 'POST',
+            body: JSON.stringify({ change_quantity: change, reason: values.reason || 'adjustment', source: 'inventory_tab' }),
+          });
+          showToast('Inventory adjusted', 'success');
+          await refreshActiveTab();
+        },
+      },
     });
-    await refreshActiveTab();
   };
 
   window.createInventoryItem = async function () {
-    const name = prompt('Item name');
-    if (!name) return;
-    const category = prompt('Category', 'Produce') || 'Produce';
-    const base_unit = prompt('Base unit', 'kg') || 'kg';
-    const current_quantity = Number(prompt('Current quantity', '0'));
-    const par_level = Number(prompt('Par level', '0'));
-    const reorder_threshold = Number(prompt('Reorder threshold', '0'));
-    const cost_per_unit = Number(prompt('Cost per unit', '0'));
-    const supplier = prompt('Supplier', '') || '';
-
-    await api('/api/inventory', {
-      method: 'POST',
-      body: JSON.stringify({
-        name,
-        category,
-        base_unit,
-        current_quantity,
-        par_level,
-        reorder_threshold,
-        cost_per_unit,
-        supplier,
-      }),
+    openAppFormModal({
+      eyebrow: 'Inventory',
+      title: 'Add Inventory Item',
+      subtitle: 'Capture stock, par levels, and supplier details in one form.',
+      submitLabel: 'Create Item',
+      fields: [
+        { name: 'name', label: 'Item name', type: 'text', required: true, fullWidth: true, placeholder: 'Example: Baby spinach' },
+        { name: 'category', label: 'Category', type: 'text', required: true, placeholder: 'Produce' },
+        { name: 'base_unit', label: 'Base unit', type: 'text', required: true, placeholder: 'kg' },
+        { name: 'current_quantity', label: 'Current quantity', type: 'number', step: 0.01, required: true },
+        { name: 'par_level', label: 'Par level', type: 'number', step: 0.01, required: true },
+        { name: 'reorder_threshold', label: 'Reorder threshold', type: 'number', step: 0.01, required: true },
+        { name: 'cost_per_unit', label: 'Cost per unit', type: 'number', step: 0.01, required: true },
+        { name: 'supplier', label: 'Supplier', type: 'text', fullWidth: true, placeholder: 'Optional supplier or vendor' },
+      ],
+      initialValues: { category: 'Produce', base_unit: 'kg', current_quantity: 0, par_level: 0, reorder_threshold: 0, cost_per_unit: 0 },
+      onSubmit: {
+        fields: [{ name: 'name' }, { name: 'category' }, { name: 'base_unit' }, { name: 'current_quantity' }, { name: 'par_level' }, { name: 'reorder_threshold' }, { name: 'cost_per_unit' }, { name: 'supplier' }],
+        handler: async (values) => {
+          await api('/api/inventory', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: (values.name || '').trim(),
+              category: (values.category || 'Produce').trim() || 'Produce',
+              base_unit: (values.base_unit || 'kg').trim() || 'kg',
+              current_quantity: Number(values.current_quantity || '0'),
+              par_level: Number(values.par_level || '0'),
+              reorder_threshold: Number(values.reorder_threshold || '0'),
+              cost_per_unit: Number(values.cost_per_unit || '0'),
+              supplier: (values.supplier || '').trim(),
+            }),
+          });
+          showToast('Inventory item created', 'success');
+          await refreshActiveTab();
+        },
+      },
     });
-    await refreshActiveTab();
   };
 
   window.exportInventoryCsv = async function () {
@@ -879,20 +1159,43 @@ async function renderProduction() {
 
   window.addPlanItem = async function () {
     if (!plan) return;
-    const list = recipes.map((r) => `${r.id}:${r.name} (${fmtNum(r.yield_amount)} ${r.yield_unit})`).join('\n');
-    const recipe_id = Number(prompt(`Select recipe ID for production:\n${list}`));
-    if (!recipe_id) return;
-    const target_yield_amount = Number(prompt('Target yield amount', '1'));
-    if (!Number.isFinite(target_yield_amount) || target_yield_amount <= 0) {
-      showToast('Target yield amount must be greater than 0', 'error');
-      return;
-    }
-    await api(`/api/production-plans/${plan.id}/items`, {
-      method: 'POST',
-      body: JSON.stringify({ recipe_id, target_yield_amount }),
+    openAppFormModal({
+      eyebrow: 'Production',
+      title: 'Add Production Item',
+      subtitle: 'Select a recipe and define the target output for today’s run.',
+      submitLabel: 'Add Production',
+      fields: [
+        {
+          name: 'recipe_id',
+          label: 'Recipe',
+          type: 'select',
+          required: true,
+          fullWidth: true,
+          emptyLabel: 'Choose a recipe',
+          options: recipes.map((recipe) => ({
+            value: recipe.id,
+            label: `${recipe.name} (${fmtNum(recipe.yield_amount)} ${recipe.yield_unit})`,
+          })),
+        },
+        { name: 'target_yield_amount', label: 'Target yield amount', type: 'number', min: 0.01, step: 0.01, required: true },
+      ],
+      initialValues: { target_yield_amount: 1 },
+      onSubmit: {
+        fields: [{ name: 'recipe_id' }, { name: 'target_yield_amount' }],
+        handler: async (values) => {
+          const recipe_id = Number(values.recipe_id || '0');
+          const target_yield_amount = Number(values.target_yield_amount || '0');
+          if (!recipe_id) throw new Error('Select a recipe');
+          if (!(target_yield_amount > 0)) throw new Error('Target yield amount must be greater than 0');
+          await api(`/api/production-plans/${plan.id}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ recipe_id, target_yield_amount }),
+          });
+          showToast('Production item added', 'success');
+          await refreshActiveTab();
+        },
+      },
     });
-    showToast('Production item added', 'success');
-    await refreshActiveTab();
   };
 
   window.sendShortages = async function () {
@@ -971,13 +1274,37 @@ async function renderGrocery() {
 
   window.addGroceryItem = async function () {
     if (!list) return;
-    const name = prompt('Item name');
-    if (!name) return;
-    const quantity = Number(prompt('Quantity', '1'));
-    const unit = prompt('Unit', 'kg') || 'kg';
-    const vendor = prompt('Vendor', '') || '';
-    await api(`/api/grocery-lists/${list.id}/items`, { method: 'POST', body: JSON.stringify({ name, quantity, unit, vendor }) });
-    await refreshActiveTab();
+    openAppFormModal({
+      eyebrow: 'Grocery',
+      title: 'Add Grocery Item',
+      subtitle: 'Create a manual grocery line item without browser prompts.',
+      submitLabel: 'Add Item',
+      fields: [
+        { name: 'name', label: 'Item name', type: 'text', required: true, fullWidth: true, placeholder: 'Example: Olive oil' },
+        { name: 'quantity', label: 'Quantity', type: 'number', min: 0.01, step: 0.01, required: true },
+        { name: 'unit', label: 'Unit', type: 'text', required: true, placeholder: 'kg' },
+        { name: 'vendor', label: 'Vendor', type: 'text', fullWidth: true, placeholder: 'Optional supplier' },
+      ],
+      initialValues: { quantity: 1, unit: 'kg' },
+      onSubmit: {
+        fields: [{ name: 'name' }, { name: 'quantity' }, { name: 'unit' }, { name: 'vendor' }],
+        handler: async (values) => {
+          const quantity = Number(values.quantity || '0');
+          if (!(quantity > 0)) throw new Error('Quantity must be greater than 0');
+          await api(`/api/grocery-lists/${list.id}/items`, {
+            method: 'POST',
+            body: JSON.stringify({
+              name: (values.name || '').trim(),
+              quantity,
+              unit: (values.unit || 'kg').trim() || 'kg',
+              vendor: (values.vendor || '').trim(),
+            }),
+          });
+          showToast('Grocery item added', 'success');
+          await refreshActiveTab();
+        },
+      },
+    });
   };
 }
 
@@ -1005,23 +1332,72 @@ async function renderPrep() {
   };
 
   window.addPrepTask = async function () {
-    const title = (prompt('Task title') || '').trim();
-    if (!title) return;
-    const typeInput = (prompt('List type (daily/additional)', 'daily') || 'daily').trim().toLowerCase();
-    const type = typeInput === 'additional' ? 'additional' : 'daily';
-    const priority = prompt('Priority (low/med/high)', 'med') || 'med';
-    const recipeList = recipes.map((r) => `${r.id}:${r.name}`).join('\n');
-    const recipe_id = Number(prompt(`Linked recipe id (optional)\n${recipeList}`) || '0') || null;
-    const assignedText = users.map((u) => `${u.id}:${u.full_name}`).join('\n');
-    const assigned_to = Number(prompt(`Assign to user id (optional)\n${assignedText}`) || '0') || null;
-    const due_time = prompt('Due time HH:MM', '') || null;
-    const notes = prompt('Notes', '') || '';
-    await api('/api/prep-tasks', {
-      method: 'POST',
-      body: JSON.stringify({ title, list_type: type, priority, recipe_id, assigned_to, due_time, notes }),
+    openAppFormModal({
+      eyebrow: 'Prep',
+      title: 'Add Prep Task',
+      subtitle: 'Create a prep task with assignment, linked recipe, and timing details in one place.',
+      submitLabel: 'Add Task',
+      fields: [
+        { name: 'title', label: 'Task title', type: 'text', required: true, fullWidth: true, placeholder: 'Example: Marinate chicken thighs' },
+        {
+          name: 'list_type',
+          label: 'List type',
+          type: 'select',
+          options: [
+            { value: 'daily', label: 'Prep List for the Day' },
+            { value: 'additional', label: 'Additional Prep List' },
+          ],
+        },
+        {
+          name: 'priority',
+          label: 'Priority',
+          type: 'select',
+          options: [
+            { value: 'low', label: 'Low' },
+            { value: 'med', label: 'Medium' },
+            { value: 'high', label: 'High' },
+          ],
+        },
+        {
+          name: 'recipe_id',
+          label: 'Linked recipe',
+          type: 'select',
+          emptyLabel: 'No linked recipe',
+          options: recipes.map((recipe) => ({ value: recipe.id, label: recipe.name })),
+        },
+        {
+          name: 'assigned_to',
+          label: 'Assign to',
+          type: 'select',
+          emptyLabel: 'Unassigned',
+          options: users.map((user) => ({ value: user.id, label: `${user.full_name} (${user.role})` })),
+        },
+        { name: 'due_time', label: 'Due time', type: 'time' },
+        { name: 'notes', label: 'Notes', type: 'textarea', rows: 5, fullWidth: true, placeholder: 'Station notes, allergen warnings, handoff info...' },
+      ],
+      initialValues: { list_type: 'daily', priority: 'med' },
+      onSubmit: {
+        fields: [{ name: 'title' }, { name: 'list_type' }, { name: 'priority' }, { name: 'recipe_id' }, { name: 'assigned_to' }, { name: 'due_time' }, { name: 'notes' }],
+        handler: async (values) => {
+          const title = (values.title || '').trim();
+          if (!title) throw new Error('Task title is required');
+          await api('/api/prep-tasks', {
+            method: 'POST',
+            body: JSON.stringify({
+              title,
+              list_type: values.list_type === 'additional' ? 'additional' : 'daily',
+              priority: values.priority || 'med',
+              recipe_id: Number(values.recipe_id || '0') || null,
+              assigned_to: Number(values.assigned_to || '0') || null,
+              due_time: values.due_time || null,
+              notes: values.notes || '',
+            }),
+          });
+          showToast('Task added', 'success');
+          await refreshActiveTab();
+        },
+      },
     });
-    showToast('Task added', 'success');
-    await refreshActiveTab();
   };
 }
 
@@ -1085,37 +1461,120 @@ async function renderSchedule() {
   `;
 
   window.addSchedule = async function () {
-    const chefList = users.map((u) => `${u.id}:${u.full_name}(${u.role})`).join('\n');
-    const user_id = Number(prompt(`Chef user id:\n${chefList}`));
-    if (!user_id) return;
-    const shift_date = prompt('Date YYYY-MM-DD', new Date().toISOString().slice(0, 10));
-    const start_time = prompt('Start HH:MM', '09:00');
-    const end_time = prompt('End HH:MM', '17:00');
-    const station = prompt('Station', 'Prep') || '';
-    const notes = prompt('Notes', '') || '';
-    await api('/api/schedules', {
-      method: 'POST',
-      body: JSON.stringify({ user_id, shift_date, start_time, end_time, station, notes, status: 'scheduled' }),
+    openAppFormModal({
+      eyebrow: 'Schedule',
+      title: 'Add Shift',
+      subtitle: 'Schedule a team member without relying on a stack of browser dialogs.',
+      submitLabel: 'Create Shift',
+      fields: [
+        {
+          name: 'user_id',
+          label: 'Team member',
+          type: 'select',
+          required: true,
+          emptyLabel: 'Choose a team member',
+          options: users.map((user) => ({ value: user.id, label: `${user.full_name} (${user.role})` })),
+        },
+        { name: 'shift_date', label: 'Shift date', type: 'date', required: true },
+        { name: 'start_time', label: 'Start time', type: 'time', required: true },
+        { name: 'end_time', label: 'End time', type: 'time', required: true },
+        { name: 'station', label: 'Station', type: 'text', placeholder: 'Prep' },
+        { name: 'notes', label: 'Notes', type: 'textarea', rows: 5, fullWidth: true, placeholder: 'Coverage details, special requests, break notes...' },
+      ],
+      initialValues: {
+        shift_date: new Date().toISOString().slice(0, 10),
+        start_time: '09:00',
+        end_time: '17:00',
+        station: 'Prep',
+      },
+      onSubmit: {
+        fields: [{ name: 'user_id' }, { name: 'shift_date' }, { name: 'start_time' }, { name: 'end_time' }, { name: 'station' }, { name: 'notes' }],
+        handler: async (values) => {
+          const user_id = Number(values.user_id || '0');
+          if (!user_id) throw new Error('Choose a team member');
+          await api('/api/schedules', {
+            method: 'POST',
+            body: JSON.stringify({
+              user_id,
+              shift_date: values.shift_date,
+              start_time: values.start_time,
+              end_time: values.end_time,
+              station: values.station || '',
+              notes: values.notes || '',
+              status: 'scheduled',
+            }),
+          });
+          showToast('Shift added', 'success');
+          await refreshActiveTab();
+        },
+      },
     });
-    await refreshActiveTab();
   };
 
   window.editSchedule = async function (id) {
     const row = schedules.find((s) => s.id === id);
     if (!row) return;
-    const chefList = users.map((u) => `${u.id}:${u.full_name}(${u.role})`).join('\n');
-    const user_id = Number(prompt(`Chef user id:\n${chefList}`, String(row.user_id)));
-    const shift_date = prompt('Date YYYY-MM-DD', row.shift_date);
-    const start_time = prompt('Start HH:MM', row.start_time);
-    const end_time = prompt('End HH:MM', row.end_time);
-    const station = prompt('Station', row.station || '') || '';
-    const notes = prompt('Notes', row.notes || '') || '';
-    const status = prompt('Status (scheduled/confirmed/cancelled)', row.status) || row.status;
-    await api(`/api/schedules/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ user_id, shift_date, start_time, end_time, station, notes, status }),
+    openAppFormModal({
+      eyebrow: 'Schedule',
+      title: `Edit Shift for ${row.chef_name}`,
+      subtitle: 'Update staffing details from a proper form instead of browser prompts.',
+      submitLabel: 'Save Shift',
+      fields: [
+        {
+          name: 'user_id',
+          label: 'Team member',
+          type: 'select',
+          required: true,
+          emptyLabel: 'Choose a team member',
+          options: users.map((user) => ({ value: user.id, label: `${user.full_name} (${user.role})` })),
+        },
+        { name: 'shift_date', label: 'Shift date', type: 'date', required: true },
+        { name: 'start_time', label: 'Start time', type: 'time', required: true },
+        { name: 'end_time', label: 'End time', type: 'time', required: true },
+        { name: 'station', label: 'Station', type: 'text' },
+        {
+          name: 'status',
+          label: 'Status',
+          type: 'select',
+          options: [
+            { value: 'scheduled', label: 'Scheduled' },
+            { value: 'confirmed', label: 'Confirmed' },
+            { value: 'cancelled', label: 'Cancelled' },
+          ],
+        },
+        { name: 'notes', label: 'Notes', type: 'textarea', rows: 5, fullWidth: true },
+      ],
+      initialValues: {
+        user_id: row.user_id,
+        shift_date: row.shift_date,
+        start_time: row.start_time,
+        end_time: row.end_time,
+        station: row.station || '',
+        status: row.status,
+        notes: row.notes || '',
+      },
+      onSubmit: {
+        fields: [{ name: 'user_id' }, { name: 'shift_date' }, { name: 'start_time' }, { name: 'end_time' }, { name: 'station' }, { name: 'status' }, { name: 'notes' }],
+        handler: async (values) => {
+          const user_id = Number(values.user_id || '0');
+          if (!user_id) throw new Error('Choose a team member');
+          await api(`/api/schedules/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+              user_id,
+              shift_date: values.shift_date,
+              start_time: values.start_time,
+              end_time: values.end_time,
+              station: values.station || '',
+              notes: values.notes || '',
+              status: values.status || row.status,
+            }),
+          });
+          showToast('Shift updated', 'success');
+          await refreshActiveTab();
+        },
+      },
     });
-    await refreshActiveTab();
   };
 
   window.deleteSchedule = async function (id) {
@@ -1145,24 +1604,46 @@ async function renderUsers() {
   `;
 
   window.createUser = async function () {
-    const username = (prompt('Username') || '').trim();
-    if (!username) return;
-    const full_name = prompt('Full name') || username;
-    const roleInput = (prompt('Role (admin/manager/prep/chef/prep chef)', 'prep') || 'prep').trim().toLowerCase();
-    const roleMap = {
-      admin: 'admin',
-      owner: 'admin',
-      chef: 'manager',
-      manager: 'manager',
-      'chef manager': 'manager',
-      prep: 'prep',
-      'prep chef': 'prep',
-    };
-    const role = roleMap[roleInput] || roleInput;
-    const password = prompt('Password', 'admin123') || 'admin123';
-    await api('/api/users', { method: 'POST', body: JSON.stringify({ username, full_name, role, password }) });
-    showToast('User created', 'success');
-    await refreshActiveTab();
+    openAppFormModal({
+      eyebrow: 'Users',
+      title: 'Create User',
+      subtitle: 'Add a new team account with role and password details in one cleaner form.',
+      submitLabel: 'Create User',
+      fields: [
+        { name: 'username', label: 'Username', type: 'text', required: true },
+        { name: 'full_name', label: 'Full name', type: 'text', required: true },
+        {
+          name: 'role',
+          label: 'Role',
+          type: 'select',
+          options: [
+            { value: 'admin', label: 'Admin' },
+            { value: 'manager', label: 'Manager' },
+            { value: 'prep', label: 'Prep' },
+          ],
+        },
+        { name: 'password', label: 'Password', type: 'password', required: true },
+      ],
+      initialValues: { role: 'prep', password: 'admin123' },
+      onSubmit: {
+        fields: [{ name: 'username' }, { name: 'full_name' }, { name: 'role' }, { name: 'password' }],
+        handler: async (values) => {
+          const username = (values.username || '').trim();
+          if (!username) throw new Error('Username is required');
+          await api('/api/users', {
+            method: 'POST',
+            body: JSON.stringify({
+              username,
+              full_name: (values.full_name || username).trim(),
+              role: values.role || 'prep',
+              password: values.password || 'admin123',
+            }),
+          });
+          showToast('User created', 'success');
+          await refreshActiveTab();
+        },
+      },
+    });
   };
 }
 
@@ -1187,4 +1668,5 @@ async function renderAnalytics() {
 }
 
 setupRecipeFormModal();
+setupAppFormModal();
 bootSession();

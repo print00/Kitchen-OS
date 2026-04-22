@@ -115,6 +115,25 @@
         </form>
       </div>
     </div>
+    <div id="appFormModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="appFormTitle">
+      <div class="modal-panel app-form-modal-panel">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow" id="appFormEyebrow">Workspace</p>
+            <h2 id="appFormTitle">Create</h2>
+            <p id="appFormSubtitle" class="modal-subtitle"></p>
+          </div>
+          <button class="icon-btn" id="appFormClose" type="button" aria-label="Close form">✕</button>
+        </div>
+        <form id="appForm" class="app-form-shell">
+          <div id="appFormFields" class="app-form-grid"></div>
+          <div class="modal-actions">
+            <button class="btn secondary" id="appFormCancel" type="button">Cancel</button>
+            <button class="btn" id="appFormSubmit" type="submit">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
     {% include 'partials/_empty_state.html' %}
     <script src="/static/app.js?v=9"></script>
   </body>
