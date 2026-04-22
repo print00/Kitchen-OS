@@ -139,12 +139,7 @@ p {
 .header-meta {
   display: grid;
   gap: 6px;
-}
-
-.header-logo {
-  width: min(220px, 100%);
-  height: auto;
-  display: block;
+  min-width: 0;
 }
 
 #sessionInfo {
@@ -692,10 +687,6 @@ pre {
 
   .header-meta h2 {
     font-size: 18px;
-  }
-
-  .header-logo {
-    width: min(180px, 45vw);
   }
 
   .mobile-sticky-actions {
